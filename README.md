@@ -141,6 +141,68 @@ npm run build
 
 ---
 
+## Deploying to Vercel
+
+### Prerequisites
+- A [Vercel account](https://vercel.com) and the project pushed to a GitHub/GitLab/Bitbucket repository.
+- A PostgreSQL database. **Recommended**: [Vercel Postgres](https://vercel.com/docs/storage/vercel-postgres) (Neon-backed, free tier available — add it from the Vercel dashboard Storage tab and it auto-injects connection strings).
+
+### Step 1 — Provision a PostgreSQL Database
+
+**Option A — Vercel Postgres (easiest):**
+1. In your Vercel project, go to **Storage → Create Database → Postgres**.
+2. Vercel automatically sets `POSTGRES_PRISMA_URL` (pooled) and `POSTGRES_URL_NON_POOLING` (direct) in your environment.
+3. In your project's **Environment Variables**, add two aliases:
+   - `DATABASE_URL` = `$POSTGRES_PRISMA_URL`
+   - `DIRECT_URL` = `$POSTGRES_URL_NON_POOLING`
+
+**Option B — External provider (Supabase, Railway, Neon, etc.):**
+Set the following in Vercel dashboard → **Settings → Environment Variables**:
+```
+DATABASE_URL=postgresql://user:password@host:5432/dbname?pgbouncer=true&connect_timeout=15
+DIRECT_URL=postgresql://user:password@host:5432/dbname?connect_timeout=15
+```
+
+### Step 2 — Set All Required Environment Variables
+
+In the Vercel dashboard → **Settings → Environment Variables**, add:
+
+| Variable | Value | Notes |
+|---|---|---|
+| `DATABASE_URL` | Pooled Postgres URL | Used by the app at runtime |
+| `DIRECT_URL` | Non-pooled Postgres URL | Used by Prisma for migrations |
+| `SESSION_SECRET` | Random 32+ char string | `openssl rand -hex 32` |
+| `COOKIE_NAME` | `els_fpa_session` | Or any custom value |
+| `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
+
+### Step 3 — Run Database Migrations
+
+Before or after the first deploy, apply your schema to the production database:
+
+```bash
+# Install Vercel CLI if needed
+npm i -g vercel
+
+# Pull environment variables locally and run migrations
+vercel env pull .env.production.local
+DATABASE_URL="<your DIRECT_URL>" npx prisma migrate deploy
+```
+
+Or use a Vercel [Deploy Hook](https://vercel.com/docs/deployments/deploy-hooks) / GitHub Action to run `prisma migrate deploy` as part of CI/CD.
+
+### Step 4 — Deploy
+
+```bash
+# Deploy via CLI
+npx vercel --prod
+
+# Or push to your main branch — Vercel auto-deploys on every push.
+```
+
+> **Note**: `prisma generate` runs automatically during `npm install` via the `postinstall` hook — no manual step needed on Vercel.
+
+---
+
 ## Project Structure
 
 ```
