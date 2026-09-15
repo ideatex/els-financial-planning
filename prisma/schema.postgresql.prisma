@@ -1,0 +1,1286 @@
+// Prisma Schema for Manufacturing FP&A Platform
+// Phase 1: Core Multi-Tenancy, RBAC, Sessions, and Audit Logging
+// Phase 2: Master Data (Plants, Products, Materials, BOM, Routing, COA, Calendar) and Planning Foundations
+// Phase 3: Targets, Assumptions, Drivers, and Planning Input Structures
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  memberships         Membership[]
+  sessions            Session[]
+  auditLogs           AuditLog[]
+  ownedCycles         PlanningCycle[]    @relation("CycleOwner")
+  ownedVersions       PlanVersion[]      @relation("VersionOwner")
+  createdTargets      ManagementTarget[] @relation("TargetCreator")
+  updatedTargets      ManagementTarget[] @relation("TargetUpdater")
+  createdAssumptions  Assumption[]       @relation("AssumptionCreator")
+  createdDrivers      Driver[]           @relation("DriverCreator")
+  createdDriverValues PlanDriverValue[]  @relation("DriverValueCreator")
+  createdPlanInputs   PlanInput[]        @relation("PlanInputCreator")
+  importedBatches     ImportBatch[]      @relation("BatchImporter")
+  performedCopyLogs   VersionCopyLog[]   @relation("VersionCopier")
+  startedCalculationRuns CalculationRun[] @relation("CalculationRunStarter")
+  uploadedActualBatches ActualImportBatch[]   @relation("ActualBatchUploader")
+  validatedActualBatches ActualImportBatch[]  @relation("ActualBatchValidator")
+  importedActualBatches ActualImportBatch[]   @relation("ActualBatchImporter")
+  lockedActualBatches ActualImportBatch[]     @relation("ActualBatchLocker")
+  createdVarianceComments VarianceComment[]   @relation("VarianceCommentCreator")
+  updatedVarianceComments VarianceComment[]   @relation("VarianceCommentUpdater")
+  reviewedPlanVersions    PlanVersion[]       @relation("PlanVersionReviewer")
+  approvedPlanVersions    PlanVersion[]       @relation("PlanVersionApprover")
+  publishedPlanVersions   PlanVersion[]       @relation("PlanVersionPublisher")
+  lockedPlanVersions      PlanVersion[]       @relation("PlanVersionLocker")
+  forecastGovernanceLogs  ForecastGovernanceLog[] @relation("ForecastGovernanceUser")
+
+  @@index([email])
+}
+
+model Organization {
+  id          String       @id @default(cuid())
+  name        String
+  slug        String       @unique
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  memberships       Membership[]
+  auditLogs         AuditLog[]
+  plants            Plant[]
+  products          Product[]
+  materials         Material[]
+  bomHeaders        BomHeader[]
+  routingHeaders    RoutingHeader[]
+  accounts          Account[]
+  fiscalCalendars   FiscalCalendar[]
+  planningCycles    PlanningCycle[]
+  planVersions      PlanVersion[]
+  managementTargets ManagementTarget[]
+  assumptions       Assumption[]
+  drivers           Driver[]
+  planDriverValues  PlanDriverValue[]
+  planInputs        PlanInput[]
+  importBatches     ImportBatch[]
+  versionCopyLogs   VersionCopyLog[]
+  calculationRuns   CalculationRun[]
+  calculationSnapshots CalculationSnapshot[]
+  financialOutputs  FinancialOutput[]
+  actualImportBatches   ActualImportBatch[]
+  actualFinancialRecords ActualFinancialRecord[]
+  actualOperationalRecords ActualOperationalRecord[]
+  reconciliationResults ReconciliationResult[]
+  varianceComments      VarianceComment[]
+  forecastPeriodSources ForecastPeriodSource[]
+  whatIfScenarioDeltas  WhatIfScenarioDelta[]
+  forecastGovernanceLogs ForecastGovernanceLog[]
+
+  @@index([slug])
+}
+
+model Membership {
+  id             String       @id @default(cuid())
+  userId         String
+  organizationId String
+  role           String       // "ADMIN" | "PLANNER" | "REVIEWER"
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+model Session {
+  id                   String   @id @default(cuid())
+  sessionToken         String   @unique
+  userId               String
+  activeOrganizationId String?
+  expiresAt            DateTime
+  createdAt            DateTime @default(now())
+  userAgent            String?
+  ipAddress            String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([sessionToken])
+  @@index([userId])
+}
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String?
+  action         String
+  entityType     String
+  entityId       String?
+  metadata       String?
+  createdAt      DateTime     @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// ==========================================
+// Phase 2: Master Data Models
+// ==========================================
+
+model Plant {
+  id             String       @id @default(cuid())
+  organizationId String
+  code           String
+  name           String
+  description    String?
+  address        String?
+  city           String?
+  state          String?
+  country        String       @default("USA")
+  timeZone       String       @default("America/Detroit")
+  baseCurrency   String       @default("USD")
+  isActive       Boolean      @default(true)
+  createdById    String?
+  updatedById    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  products          Product[]          @relation("DefaultPlant")
+  routingHeaders    RoutingHeader[]
+  managementTargets ManagementTarget[]
+  assumptions       Assumption[]
+  planDriverValues  PlanDriverValue[]
+  planInputs        PlanInput[]
+  calculationRuns   CalculationRun[]
+  calculationSnapshots CalculationSnapshot[]
+  financialOutputs  FinancialOutput[]
+  actualImportBatches   ActualImportBatch[]
+  actualFinancialRecords ActualFinancialRecord[]
+  actualOperationalRecords ActualOperationalRecord[]
+  varianceComments      VarianceComment[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([isActive])
+}
+
+model Product {
+  id                 String       @id @default(cuid())
+  organizationId     String
+  code               String       // SKU
+  name               String
+  description        String?
+  category           String
+  productType        String       // "FINISHED_GOOD", "SEMI_FINISHED_GOOD", "RAW_MATERIAL", "PACKAGING", "SERVICE", "OTHER"
+  unitOfMeasure      String       // "EA", "KG", "METER", etc.
+  defaultPlantId     String?
+  standardPriceCents Int          @default(0) // Integer cents for deterministic calculation
+  currency           String       @default("USD")
+  isActive           Boolean      @default(true)
+  effectiveFrom      DateTime?
+  effectiveTo        DateTime?
+  createdById        String?
+  updatedById        String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  defaultPlant      Plant?             @relation("DefaultPlant", fields: [defaultPlantId], references: [id], onDelete: SetNull)
+  bomHeaders        BomHeader[]
+  routingHeaders    RoutingHeader[]
+  bomLines          BomLine[]          @relation("ComponentProduct")
+  managementTargets ManagementTarget[]
+  assumptions       Assumption[]
+  planDriverValues  PlanDriverValue[]
+  planInputs        PlanInput[]
+  calculationRuns   CalculationRun[]
+  calculationSnapshots CalculationSnapshot[]
+  financialOutputs  FinancialOutput[]
+  actualFinancialRecords ActualFinancialRecord[]
+  actualOperationalRecords ActualOperationalRecord[]
+  varianceComments      VarianceComment[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([category])
+  @@index([productType])
+  @@index([isActive])
+}
+
+model Material {
+  id                String       @id @default(cuid())
+  organizationId    String
+  code              String
+  name              String
+  description       String?
+  category          String
+  unitOfMeasure     String
+  defaultCostCents  Int          @default(0) // Integer cents
+  currency          String       @default("USD")
+  supplierReference String?
+  leadTimeDays      Int          @default(0)
+  isActive          Boolean      @default(true)
+  createdById       String?
+  updatedById       String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  bomLines     BomLine[]
+  planInputs   PlanInput[]
+  actualFinancialRecords ActualFinancialRecord[]
+  actualOperationalRecords ActualOperationalRecord[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([category])
+  @@index([isActive])
+}
+
+model BomHeader {
+  id             String       @id @default(cuid())
+  organizationId String
+  productId      String
+  name           String
+  description    String?
+  isActive       Boolean      @default(true)
+  createdById    String?
+  updatedById    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  product      Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  versions     BomVersion[]
+
+  @@unique([organizationId, productId, name])
+  @@index([organizationId])
+  @@index([productId])
+}
+
+model BomVersion {
+  id            String    @id @default(cuid())
+  bomHeaderId   String
+  versionNumber Int       @default(1)
+  status        String    @default("DRAFT") // "DRAFT", "IN_REVIEW", "APPROVED", "ARCHIVED"
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+  createdById   String?
+  updatedById   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  bomHeader BomHeader @relation(fields: [bomHeaderId], references: [id], onDelete: Cascade)
+  lines     BomLine[]
+
+  @@unique([bomHeaderId, versionNumber])
+  @@index([bomHeaderId])
+  @@index([status])
+}
+
+model BomLine {
+  id                 String   @id @default(cuid())
+  bomVersionId       String
+  componentType      String   // "MATERIAL" | "PRODUCT"
+  materialId         String?
+  componentProductId String?
+  quantityPerUnit    Float
+  unitOfMeasure      String
+  scrapPercentage    Float    @default(0.0)
+  createdById        String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  bomVersion       BomVersion @relation(fields: [bomVersionId], references: [id], onDelete: Cascade)
+  material         Material?  @relation(fields: [materialId], references: [id], onDelete: SetNull)
+  componentProduct Product?   @relation("ComponentProduct", fields: [componentProductId], references: [id], onDelete: SetNull)
+
+  @@index([bomVersionId])
+  @@index([materialId])
+  @@index([componentProductId])
+}
+
+model RoutingHeader {
+  id             String       @id @default(cuid())
+  organizationId String
+  productId      String
+  plantId        String
+  name           String
+  description    String?
+  isActive       Boolean      @default(true)
+  createdById    String?
+  updatedById    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  product      Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  plant        Plant            @relation(fields: [plantId], references: [id], onDelete: Cascade)
+  versions     RoutingVersion[]
+
+  @@unique([organizationId, productId, plantId, name])
+  @@index([organizationId])
+  @@index([productId])
+  @@index([plantId])
+}
+
+model RoutingVersion {
+  id               String             @id @default(cuid())
+  routingHeaderId  String
+  versionNumber    Int                @default(1)
+  status           String             @default("DRAFT") // "DRAFT", "IN_REVIEW", "APPROVED", "ARCHIVED"
+  effectiveFrom    DateTime?
+  effectiveTo      DateTime?
+  createdById      String?
+  updatedById      String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  routingHeader   RoutingHeader      @relation(fields: [routingHeaderId], references: [id], onDelete: Cascade)
+  operations       RoutingOperation[]
+
+  @@unique([routingHeaderId, versionNumber])
+  @@index([routingHeaderId])
+  @@index([status])
+}
+
+model RoutingOperation {
+  id                    String         @id @default(cuid())
+  routingVersionId      String
+  sequence              Int            // 10, 20, 30, etc.
+  operationName         String
+  workCenter            String
+  description           String?
+  setupTimeMinutes      Float          @default(0.0)
+  runTimePerUnitMinutes Float          @default(0.0)
+  laborHoursPerUnit     Float          @default(0.0)
+  machineHoursPerUnit   Float          @default(0.0)
+  capacityUnit          String         @default("HOURS")
+  createdById           String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  routingVersion        RoutingVersion @relation(fields: [routingVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([routingVersionId, sequence])
+  @@index([routingVersionId])
+}
+
+model Account {
+  id              String       @id @default(cuid())
+  organizationId  String
+  code            String       // e.g. "1000", "5010"
+  name            String
+  accountType     String       // "ASSET", "LIABILITY", "EQUITY", "REVENUE", "COGS", "OPERATING_EXPENSE", "OTHER_INCOME", "OTHER_EXPENSE", "TAX"
+  parentAccountId String?
+  description     String?
+  normalBalance   String       @default("DEBIT") // "DEBIT" | "CREDIT"
+  currency        String       @default("USD")
+  isActive        Boolean      @default(true)
+  createdById     String?
+  updatedById     String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parentAccount     Account?           @relation("AccountHierarchy", fields: [parentAccountId], references: [id], onDelete: SetNull)
+  childAccounts     Account[]          @relation("AccountHierarchy")
+  managementTargets ManagementTarget[]
+  assumptions       Assumption[]
+  planInputs        PlanInput[]
+  financialOutputs  FinancialOutput[]
+  actualFinancialRecords ActualFinancialRecord[]
+  varianceComments      VarianceComment[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([parentAccountId])
+  @@index([accountType])
+}
+
+model FiscalCalendar {
+  id                   String         @id @default(cuid())
+  organizationId       String
+  name                 String
+  fiscalYearStartMonth Int            @default(1) // 1-12
+  calendarType         String         @default("MONTHLY") // "MONTHLY"
+  status               String         @default("ACTIVE") // "ACTIVE", "ARCHIVED"
+  createdById          String?
+  updatedById          String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  organization         Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  periods              FiscalPeriod[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model FiscalPeriod {
+  id               String         @id @default(cuid())
+  fiscalCalendarId String
+  fiscalYear       Int
+  periodNumber     Int            // 1-12
+  periodName       String         // e.g. "2026-P01 (Oct)"
+  startDate        DateTime
+  endDate          DateTime
+  quarter          Int            // 1-4
+  status           String         @default("OPEN") // "OPEN", "CLOSED", "LOCKED"
+  closedDate       DateTime?
+  createdById      String?
+  updatedById      String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  fiscalCalendar           FiscalCalendar     @relation(fields: [fiscalCalendarId], references: [id], onDelete: Cascade)
+  startInCycles            PlanningCycle[]    @relation("CycleStartPeriod")
+  endInCycles              PlanningCycle[]    @relation("CycleEndPeriod")
+  managementTargets        ManagementTarget[]
+  effectiveFromAssumptions Assumption[]       @relation("AssumptionEffectiveFrom")
+  effectiveToAssumptions   Assumption[]       @relation("AssumptionEffectiveTo")
+  planDriverValues         PlanDriverValue[]
+  planInputs               PlanInput[]
+  calculationRuns          CalculationRun[]
+  calculationSnapshots     CalculationSnapshot[]
+  financialOutputs         FinancialOutput[]
+  actualImportBatches      ActualImportBatch[]
+  actualFinancialRecords   ActualFinancialRecord[]
+  actualOperationalRecords ActualOperationalRecord[]
+  varianceComments         VarianceComment[]
+  cutoffInPlanVersions       PlanVersion[]          @relation("ForecastActualsCutoff")
+  horizonStartInPlanVersions PlanVersion[]          @relation("ForecastHorizonStart")
+  horizonEndInPlanVersions   PlanVersion[]          @relation("ForecastHorizonEnd")
+  forecastPeriodSources      ForecastPeriodSource[]
+
+  @@unique([fiscalCalendarId, fiscalYear, periodNumber])
+  @@index([fiscalCalendarId])
+  @@index([fiscalYear])
+  @@index([status])
+}
+
+model PlanningCycle {
+  id             String         @id @default(cuid())
+  organizationId String
+  name           String
+  planningType   String         // "ANNUAL_BUDGET", "ROLLING_FORECAST", "MONTHLY_FORECAST", "SCENARIO_PLAN"
+  fiscalYear     Int
+  startPeriodId  String?
+  endPeriodId    String?
+  description    String?
+  ownerUserId    String?
+  status         String         @default("DRAFT") // "DRAFT", "OPEN", "IN_REVIEW", "APPROVED", "CLOSED", "ARCHIVED"
+  createdById    String?
+  updatedById    String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  owner             User?              @relation("CycleOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  startPeriod       FiscalPeriod?      @relation("CycleStartPeriod", fields: [startPeriodId], references: [id], onDelete: SetNull)
+  endPeriod         FiscalPeriod?      @relation("CycleEndPeriod", fields: [endPeriodId], references: [id], onDelete: SetNull)
+  planVersions      PlanVersion[]
+  managementTargets ManagementTarget[]
+  assumptions       Assumption[]
+  planInputs        PlanInput[]
+  calculationRuns   CalculationRun[]
+  financialOutputs  FinancialOutput[]
+  varianceComments  VarianceComment[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([status])
+  @@index([fiscalYear])
+}
+
+model PlanVersion {
+  id                      String         @id @default(cuid())
+  organizationId          String
+  planningCycleId         String
+  versionName             String
+  versionCode             String         // e.g. "V1-BASE"
+  versionType             String         // "ORIGINAL_BUDGET", "REVISED_BUDGET", "FORECAST", "BEST_CASE", "BASE_CASE", "WORST_CASE", "MANAGEMENT_SCENARIO"
+  description             String?
+  scenarioLabel           String?
+  baseVersionId           String?
+  ownerUserId             String?
+  status                  String         @default("DRAFT") // "DRAFT", "IN_REVIEW", "APPROVED", "REJECTED", "LOCKED", "ARCHIVED", "PREPARING", "CALCULATING", "CALCULATED", "CALCULATION_WARNING", "CALCULATION_FAILED", "PUBLISHED", "SUPERSEDED"
+  rejectionReason         String?
+  submittedDate           DateTime?
+  approvedDate            DateTime?
+  lockedDate              DateTime?
+  forecastType            String?        // "ANNUAL_FORECAST", "MONTHLY_FORECAST", "QUARTERLY_FORECAST", "ROLLING_FORECAST", "REFORECAST", "SCENARIO_FORECAST"
+  actualsCutoffPeriodId   String?
+  forecastHorizonStartId  String?
+  forecastHorizonEndId    String?
+  forecastMethod          String?        // "PLAN_BASED", "ACTUAL_RUN_RATE", "ACTUALS_PLUS_REMAINING_PLAN", "DRIVER_BASED", "PREVIOUS_FORECAST", "MANUAL_ADJUSTMENT"
+  sourceForecastVersionId String?
+  basePlanVersionId       String?
+  versionNumber           Int            @default(1)
+  isBaseline              Boolean        @default(true)
+  isPublished             Boolean        @default(false)
+  isLocked                Boolean        @default(false)
+  scenarioType            String?        // "BASE_CASE", "BEST_CASE", "WORST_CASE", "DOWNSIDE_CASE", "UPSIDE_CASE", "CUSTOM"
+  publishedDate           DateTime?
+  publishedById           String?
+  reviewedDate            DateTime?
+  reviewedById            String?
+  approvedById            String?
+  lockedById              String?
+  supersededDate          DateTime?
+  forecastMetadata        String?        // JSON metadata
+  createdById             String?
+  updatedById             String?
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+
+  organization            Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  planningCycle           PlanningCycle      @relation(fields: [planningCycleId], references: [id], onDelete: Cascade)
+  owner                   User?              @relation("VersionOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  baseVersion             PlanVersion?       @relation("VersionDerivation", fields: [baseVersionId], references: [id], onDelete: SetNull)
+  derivedVersions         PlanVersion[]      @relation("VersionDerivation")
+  actualsCutoffPeriod     FiscalPeriod?      @relation("ForecastActualsCutoff", fields: [actualsCutoffPeriodId], references: [id], onDelete: SetNull)
+  forecastHorizonStart    FiscalPeriod?      @relation("ForecastHorizonStart", fields: [forecastHorizonStartId], references: [id], onDelete: SetNull)
+  forecastHorizonEnd      FiscalPeriod?      @relation("ForecastHorizonEnd", fields: [forecastHorizonEndId], references: [id], onDelete: SetNull)
+  sourceForecastVersion   PlanVersion?       @relation("ForecastDerivation", fields: [sourceForecastVersionId], references: [id], onDelete: SetNull)
+  derivedForecastVersions PlanVersion[]      @relation("ForecastDerivation")
+  basePlanVersion         PlanVersion?       @relation("BasePlanToForecast", fields: [basePlanVersionId], references: [id], onDelete: SetNull)
+  derivedFromBasePlan     PlanVersion[]      @relation("BasePlanToForecast")
+  reviewedByUser          User?              @relation("PlanVersionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  approvedByUser          User?              @relation("PlanVersionApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  publishedByUser         User?              @relation("PlanVersionPublisher", fields: [publishedById], references: [id], onDelete: SetNull)
+  lockedByUser            User?              @relation("PlanVersionLocker", fields: [lockedById], references: [id], onDelete: SetNull)
+  managementTargets       ManagementTarget[]
+  assumptions             Assumption[]
+  planDriverValues        PlanDriverValue[]
+  planInputs              PlanInput[]
+  importBatches           ImportBatch[]
+  sourceCopyLogs          VersionCopyLog[]   @relation("SourceVersionCopy")
+  targetCopyLogs          VersionCopyLog[]   @relation("TargetVersionCopy")
+  calculationRuns         CalculationRun[]
+  calculationSnapshots    CalculationSnapshot[]
+  financialOutputs        FinancialOutput[]
+  varianceComments        VarianceComment[]
+  forecastPeriodSources   ForecastPeriodSource[]
+  whatIfScenarioDeltas    WhatIfScenarioDelta[]
+  governanceLogs          ForecastGovernanceLog[]
+
+  @@unique([planningCycleId, versionCode])
+  @@index([organizationId])
+  @@index([planningCycleId])
+  @@index([status])
+  @@index([forecastType])
+  @@index([scenarioType])
+}
+
+// ==========================================
+// Phase 3: Targets, Assumptions, Drivers, Inputs
+// ==========================================
+
+model ManagementTarget {
+  id              String        @id @default(cuid())
+  organizationId  String
+  planningCycleId String
+  planVersionId   String
+  fiscalPeriodId  String
+  plantId         String?
+  productId       String?
+  accountId       String?
+  targetMetric    String        // "REVENUE", "SALES_QUANTITY", "GROSS_PROFIT", "OPERATING_PROFIT", "PRODUCTION_QUANTITY", "ENDING_INVENTORY", "OPERATING_EXPENSE", "HEADCOUNT", "CAPEX", "CASH_BALANCE", "WORKING_CAPITAL", "GROSS_MARGIN_PERCENT"
+  targetValue     Float
+  unitOfMeasure   String        // "USD", "EA", "KG", "PERCENT", etc.
+  currency        String?       @default("USD")
+  sourceType      String        @default("MANUAL_ENTRY") // "MANUAL_ENTRY", "EXCEL_IMPORT", "CSV_IMPORT", "MANAGEMENT_SUBMISSION", "APPROVED_BASELINE", "EXTERNAL_SYSTEM"
+  sourceReference String?
+  notes           String?
+  status          String        @default("DRAFT") // "DRAFT", "SUBMITTED", "APPROVED", "REJECTED", "LOCKED"
+  createdById     String?
+  updatedById     String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  planningCycle   PlanningCycle @relation(fields: [planningCycleId], references: [id], onDelete: Cascade)
+  planVersion     PlanVersion   @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  fiscalPeriod    FiscalPeriod  @relation(fields: [fiscalPeriodId], references: [id], onDelete: Cascade)
+  plant           Plant?        @relation(fields: [plantId], references: [id], onDelete: SetNull)
+  product         Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  account         Account?      @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  createdByUser   User?         @relation("TargetCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedByUser   User?         @relation("TargetUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([planningCycleId])
+  @@index([planVersionId])
+  @@index([fiscalPeriodId])
+  @@index([targetMetric])
+  @@index([status])
+}
+
+model Assumption {
+  id                    String        @id @default(cuid())
+  organizationId        String
+  planningCycleId       String
+  planVersionId         String
+  name                  String
+  code                  String        // unique per plan version
+  description           String?
+  category              String        // "PRICING", "SALES_VOLUME", "INVENTORY", "PRODUCTION", "MATERIAL_COST", "LABOR_COST", "OVERHEAD", "OPERATING_EXPENSE", "HEADCOUNT", "TAX", "INTEREST", "WORKING_CAPITAL", "CAPITAL_EXPENDITURE", "FOREIGN_EXCHANGE", "OTHER"
+  valueType             String        // "NUMBER", "PERCENTAGE", "CURRENCY", "QUANTITY", "BOOLEAN", "TEXT", "DATE"
+  numericValue          Float?
+  textValue             String?
+  booleanValue          Boolean?
+  dateValue             DateTime?
+  unit                  String?
+  currency              String?       @default("USD")
+  effectiveFromPeriodId String?
+  effectiveToPeriodId   String?
+  plantId               String?
+  productId             String?
+  accountId             String?
+  source                String?
+  confidenceLevel       String?       @default("MEDIUM") // "HIGH", "MEDIUM", "LOW"
+  status                String        @default("DRAFT")  // "DRAFT", "APPROVED", "LOCKED"
+  notes                 String?
+  createdById           String?
+  updatedById           String?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  organization          Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  planningCycle         PlanningCycle @relation(fields: [planningCycleId], references: [id], onDelete: Cascade)
+  planVersion           PlanVersion   @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  effectiveFromPeriod   FiscalPeriod? @relation("AssumptionEffectiveFrom", fields: [effectiveFromPeriodId], references: [id], onDelete: SetNull)
+  effectiveToPeriod     FiscalPeriod? @relation("AssumptionEffectiveTo", fields: [effectiveToPeriodId], references: [id], onDelete: SetNull)
+  plant                 Plant?        @relation(fields: [plantId], references: [id], onDelete: SetNull)
+  product               Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  account               Account?      @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  createdByUser         User?         @relation("AssumptionCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([planVersionId, code])
+  @@index([organizationId])
+  @@index([planVersionId])
+  @@index([category])
+  @@index([status])
+}
+
+model Driver {
+  id              String            @id @default(cuid())
+  organizationId  String
+  driverCode      String            // unique within org e.g. "DRV-SCRAP-01"
+  driverName      String
+  description     String?
+  driverCategory  String            // "DEMAND", "REVENUE", "PRODUCTION", "INVENTORY", "MATERIAL", "LABOR", "MACHINE", "OVERHEAD", "OPEX", "HEADCOUNT", "WORKING_CAPITAL", "TAX", "FINANCING", "CAPEX"
+  driverType      String            // "RATE", "QUANTITY", "PERCENTAGE", "DURATION", "CAPACITY", "RATIO", "BOOLEAN", "AMOUNT"
+  unitOfMeasure   String
+  currency        String?           @default("USD")
+  defaultValue    Float             @default(0.0)
+  isActive        Boolean           @default(true)
+  effectiveFrom   DateTime?
+  effectiveTo     DateTime?
+  createdById     String?
+  updatedById     String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdByUser   User?             @relation("DriverCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  planValues      PlanDriverValue[]
+  planInputs      PlanInput[]
+
+  @@unique([organizationId, driverCode])
+  @@index([organizationId])
+  @@index([driverCategory])
+  @@index([isActive])
+}
+
+model PlanDriverValue {
+  id              String        @id @default(cuid())
+  organizationId  String
+  planVersionId   String
+  driverId        String
+  fiscalPeriodId  String?
+  plantId         String?
+  productId       String?
+  driverValue     Float
+  isOverridden    Boolean       @default(false)
+  overrideReason  String?
+  status          String        @default("DRAFT") // "DRAFT", "APPROVED", "LOCKED"
+  notes           String?
+  createdById     String?
+  updatedById     String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  planVersion     PlanVersion   @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  driver          Driver        @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  fiscalPeriod    FiscalPeriod? @relation(fields: [fiscalPeriodId], references: [id], onDelete: SetNull)
+  plant           Plant?        @relation(fields: [plantId], references: [id], onDelete: SetNull)
+  product         Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  createdByUser   User?         @relation("DriverValueCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([planVersionId])
+  @@index([driverId])
+  @@index([fiscalPeriodId])
+}
+
+model PlanInput {
+  id              String        @id @default(cuid())
+  organizationId  String
+  planningCycleId String
+  planVersionId   String
+  fiscalPeriodId  String
+  plantId         String?
+  productId       String?
+  materialId      String?
+  accountId       String?
+  driverId        String?
+  importBatchId   String?
+  inputCategory   String        // "DEMAND", "PRODUCTION", "MATERIAL", "LABOR", "OVERHEAD", "OPEX"
+  inputCode       String        // e.g. "SALES_VOLUME", "SELLING_PRICE", "TARGET_ENDING_INVENTORY", "YIELD_PCT", "SCRAP_PCT", "LABOR_HOURS_PER_UNIT", "LABOR_RATE", "FIXED_OVERHEAD", "OPEX_PLANNED_AMOUNT"
+  inputValue      Float
+  unitOfMeasure   String
+  currency        String?       @default("USD")
+  sourceType      String        @default("MANUAL") // "MANUAL", "IMPORT", "MANAGEMENT_TARGET", "ASSUMPTION", "DRIVER", "PRIOR_PLAN_VERSION", "ACTUALS", "EXTERNAL_INTEGRATION"
+  sourceReference String?
+  isOverridden    Boolean       @default(false)
+  overrideReason  String?
+  status          String        @default("DRAFT")  // "DRAFT", "VALID", "INVALID", "OVERRIDDEN", "SUBMITTED", "APPROVED", "LOCKED"
+  notes           String?
+  createdById     String?
+  updatedById     String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  planningCycle   PlanningCycle @relation(fields: [planningCycleId], references: [id], onDelete: Cascade)
+  planVersion     PlanVersion   @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  fiscalPeriod    FiscalPeriod  @relation(fields: [fiscalPeriodId], references: [id], onDelete: Cascade)
+  plant           Plant?        @relation(fields: [plantId], references: [id], onDelete: SetNull)
+  product         Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  material        Material?     @relation(fields: [materialId], references: [id], onDelete: SetNull)
+  account         Account?      @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  driver          Driver?       @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  importBatch     ImportBatch?  @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  createdByUser   User?         @relation("PlanInputCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([planVersionId])
+  @@index([inputCategory])
+  @@index([fiscalPeriodId])
+  @@index([plantId])
+  @@index([productId])
+  @@index([materialId])
+  @@index([accountId])
+}
+
+model ImportBatch {
+  id               String       @id @default(cuid())
+  organizationId   String
+  planVersionId    String
+  entityType       String       // "MANAGEMENT_TARGET", "PLAN_INPUT", "ASSUMPTION", "DRIVER"
+  fileName         String
+  fileSize         Int          @default(0)
+  totalRows        Int          @default(0)
+  validRows        Int          @default(0)
+  invalidRows      Int          @default(0)
+  status           String       @default("PREVIEW") // "PREVIEW", "COMPLETED", "FAILED"
+  validationErrors String?      // JSON serialized string
+  importedById     String?
+  createdAt        DateTime     @default(now())
+
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  planVersion      PlanVersion  @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  importedByUser   User?        @relation("BatchImporter", fields: [importedById], references: [id], onDelete: SetNull)
+  planInputs       PlanInput[]
+
+  @@index([organizationId])
+  @@index([planVersionId])
+}
+
+model VersionCopyLog {
+  id               String       @id @default(cuid())
+  organizationId   String
+  sourceVersionId  String
+  targetVersionId  String
+  categoriesCopied String       // JSON serialized array e.g. ["ASSUMPTIONS", "DRIVERS", "TARGETS", "INPUTS"]
+  overwritePolicy  String       @default("SKIP") // "OVERWRITE", "SKIP"
+  recordsCount     Int          @default(0)
+  copiedById       String
+  createdAt        DateTime     @default(now())
+
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sourceVersion    PlanVersion  @relation("SourceVersionCopy", fields: [sourceVersionId], references: [id], onDelete: Cascade)
+  targetVersion    PlanVersion  @relation("TargetVersionCopy", fields: [targetVersionId], references: [id], onDelete: Cascade)
+  copiedByUser     User         @relation("VersionCopier", fields: [copiedById], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([sourceVersionId])
+  @@index([targetVersionId])
+}
+
+// ==========================================
+// Phase 4: Deterministic Financial Engine Models
+// ==========================================
+
+model CalculationRun {
+  id              String        @id @default(cuid())
+  organizationId  String
+  planningCycleId String
+  planVersionId   String
+  fiscalPeriodId  String
+  plantId         String?
+  productId       String?
+  status          String        @default("QUEUED") // "QUEUED", "RUNNING", "COMPLETED", "COMPLETED_WITH_WARNINGS", "FAILED", "CANCELLED"
+  startedById     String
+  startedAt       DateTime      @default(now())
+  completedAt     DateTime?
+  durationMs      Int?
+  engineVersion   String        @default("1.0.0")
+  snapshotId      String?
+  errorCount      Int           @default(0)
+  warningCount    Int           @default(0)
+  resultSummary   String?       // JSON metadata summary (key financial metrics)
+  failureReason   String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  organization    Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  planningCycle   PlanningCycle        @relation(fields: [planningCycleId], references: [id], onDelete: Cascade)
+  planVersion     PlanVersion          @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  fiscalPeriod    FiscalPeriod         @relation(fields: [fiscalPeriodId], references: [id], onDelete: Cascade)
+  plant           Plant?               @relation(fields: [plantId], references: [id], onDelete: SetNull)
+  product         Product?             @relation(fields: [productId], references: [id], onDelete: SetNull)
+  startedByUser   User                 @relation("CalculationRunStarter", fields: [startedById], references: [id], onDelete: Cascade)
+  snapshot        CalculationSnapshot? @relation(fields: [snapshotId], references: [id], onDelete: SetNull)
+  outputs         FinancialOutput[]
+  validations     CalculationValidation[]
+
+  @@index([organizationId])
+  @@index([planVersionId])
+  @@index([fiscalPeriodId])
+  @@index([plantId])
+  @@index([productId])
+  @@index([status])
+}
+
+model CalculationSnapshot {
+  id             String        @id @default(cuid())
+  organizationId String
+  planVersionId  String
+  fiscalPeriodId String
+  plantId        String?
+  productId      String?
+  snapshotHash   String        // SHA-256 digest of normalized payload
+  payload        String        // JSON string of all resolved inputs, drivers, assumptions, BOM, routing
+  createdAt      DateTime      @default(now())
+
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  planVersion    PlanVersion   @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  fiscalPeriod   FiscalPeriod  @relation(fields: [fiscalPeriodId], references: [id], onDelete: Cascade)
+  plant          Plant?        @relation(fields: [plantId], references: [id], onDelete: SetNull)
+  product        Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  calculationRuns CalculationRun[]
+
+  @@index([organizationId])
+  @@index([planVersionId])
+  @@index([fiscalPeriodId])
+  @@index([snapshotHash])
+}
+
+model FinancialOutput {
+  id                    String         @id @default(cuid())
+  organizationId        String
+  calculationRunId      String
+  planningCycleId       String
+  planVersionId         String
+  fiscalPeriodId        String
+  plantId               String?
+  productId             String?
+  accountId             String?
+  outputCategory        String         // "DEMAND", "PRODUCTION", "MATERIAL_COST", "LABOR_COST", "OVERHEAD", "STANDARD_COST", "COGM", "COGS", "REVENUE", "GROSS_PROFIT", "OPEX", "OPERATING_PROFIT", "WORKING_CAPITAL", "CASH_FLOW", "BALANCE_SHEET"
+  outputCode            String         // e.g. "REVENUE", "COGS", "GROSS_PROFIT", "OPERATING_PROFIT", "STANDARD_UNIT_COST"
+  outputValue           Float
+  unitOfMeasure         String         // e.g. "USD", "EA", "%", "HRS", "INR"
+  currency              String         @default("USD")
+  calculationStage      String         // stage name
+  formulaReference      String?        // e.g. "Units Sold * Selling Price"
+  sourceInputReferences String?        // JSON metadata
+  lineage               String?        // JSON trace
+  createdAt             DateTime       @default(now())
+
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  calculationRun CalculationRun @relation(fields: [calculationRunId], references: [id], onDelete: Cascade)
+  planningCycle  PlanningCycle  @relation(fields: [planningCycleId], references: [id], onDelete: Cascade)
+  planVersion    PlanVersion    @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  fiscalPeriod   FiscalPeriod   @relation(fields: [fiscalPeriodId], references: [id], onDelete: Cascade)
+  plant          Plant?         @relation(fields: [plantId], references: [id], onDelete: SetNull)
+  product        Product?       @relation(fields: [productId], references: [id], onDelete: SetNull)
+  account        Account?       @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([calculationRunId])
+  @@index([planVersionId])
+  @@index([fiscalPeriodId])
+  @@index([outputCategory])
+  @@index([outputCode])
+}
+
+model CalculationValidation {
+  id                  String         @id @default(cuid())
+  calculationRunId    String
+  code                String         // e.g. "MISSING_SELLING_PRICE", "BALANCE_SHEET_IMBALANCE"
+  severity            String         // "INFO", "WARNING", "ERROR", "CRITICAL"
+  message             String
+  calculationStage    String
+  entityType          String?        // "PRODUCT", "BOM", "ROUTING", "PLAN_INPUT", etc.
+  entityId            String?
+  field               String?
+  suggestedResolution String?
+  createdAt           DateTime       @default(now())
+
+  calculationRun      CalculationRun @relation(fields: [calculationRunId], references: [id], onDelete: Cascade)
+
+  @@index([calculationRunId])
+  @@index([severity])
+  @@index([calculationStage])
+}
+
+// ==========================================
+// Phase 5: Actuals, Reconciliation, Variance & Reporting Models
+// ==========================================
+
+model ActualImportBatch {
+  id                  String        @id @default(cuid())
+  organizationId      String
+  name                String
+  description         String?
+  sourceType          String        @default("CSV") // "CSV", "XLSX", "ERP", "MANUAL"
+  originalFileName    String
+  fileSize            Int           @default(0)
+  fileHash            String        // SHA-256 hash of source file
+  importType          String        // "GL_ACTUALS", "REVENUE_ACTUALS", "PRODUCTION_ACTUALS", "MATERIAL_ACTUALS", "LABOR_ACTUALS", "OPEX_ACTUALS"
+  fiscalPeriodId      String
+  plantId             String?
+  dateRangeStart      DateTime?
+  dateRangeEnd        DateTime?
+  currency            String        @default("USD")
+  status              String        @default("UPLOADED") // "UPLOADED", "PARSING", "VALIDATING", "VALIDATION_FAILED", "VALIDATED", "IMPORTING", "IMPORTED", "PARTIALLY_IMPORTED", "IMPORT_FAILED", "SUPERSEDED", "LOCKED", "REVERSED"
+  uploadedById        String
+  validatedById       String?
+  importedById        String?
+  lockedById          String?
+  uploadedAt          DateTime      @default(now())
+  validatedAt         DateTime?
+  importedAt          DateTime?
+  lockedAt            DateTime?
+  supersedesBatchId   String?
+  controlTotal        Float?
+  importedTotal       Float?
+  acceptedRowCount    Int           @default(0)
+  rejectedRowCount    Int           @default(0)
+  warningCount        Int           @default(0)
+  errorCount          Int           @default(0)
+  mappingConfig       String?       // JSON string of column mapping profile
+  sourceFileContent   String?       // Raw CSV/XLSX text or base64 preserved as immutable source
+  reconciliationStatus String       @default("PENDING") // "PENDING", "RECONCILED", "UNBALANCED", "FAILED"
+  reversalReason      String?
+  metadata            String?       // JSON string
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  organization        Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  fiscalPeriod        FiscalPeriod  @relation(fields: [fiscalPeriodId], references: [id], onDelete: Cascade)
+  plant               Plant?        @relation(fields: [plantId], references: [id], onDelete: SetNull)
+  uploadedByUser      User          @relation("ActualBatchUploader", fields: [uploadedById], references: [id], onDelete: Cascade)
+  validatedByUser     User?         @relation("ActualBatchValidator", fields: [validatedById], references: [id], onDelete: SetNull)
+  importedByUser      User?         @relation("ActualBatchImporter", fields: [importedById], references: [id], onDelete: SetNull)
+  lockedByUser        User?         @relation("ActualBatchLocker", fields: [lockedById], references: [id], onDelete: SetNull)
+  supersedesBatch     ActualImportBatch?  @relation("BatchSuperseding", fields: [supersedesBatchId], references: [id], onDelete: SetNull)
+  supersededByBatches ActualImportBatch[] @relation("BatchSuperseding")
+
+  financialRecords    ActualFinancialRecord[]
+  operationalRecords  ActualOperationalRecord[]
+  importRows          ActualImportRow[]
+  reconciliationResults ReconciliationResult[]
+
+  @@index([organizationId])
+  @@index([fiscalPeriodId])
+  @@index([plantId])
+  @@index([status])
+  @@index([importType])
+  @@index([fileHash])
+}
+
+model ActualFinancialRecord {
+  id                    String            @id @default(cuid())
+  organizationId        String
+  importBatchId         String
+  fiscalPeriodId        String
+  transactionDate       DateTime
+  plantId               String?
+  productId             String?
+  materialId            String?
+  accountId             String?
+  currency              String            @default("USD")
+  amount                Float
+  quantity              Float?
+  unitRate              Float?
+  debitAmount           Float?
+  creditAmount          Float?
+  description           String?
+  externalReference     String?
+  sourceRowNumber       Int
+  sourceRecordIdentifier String?
+  mappingStatus         String            @default("MAPPED")
+  reconciliationStatus  String            @default("RECONCILED")
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  organization          Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  importBatch           ActualImportBatch @relation(fields: [importBatchId], references: [id], onDelete: Cascade)
+  fiscalPeriod          FiscalPeriod      @relation(fields: [fiscalPeriodId], references: [id], onDelete: Cascade)
+  plant                 Plant?            @relation(fields: [plantId], references: [id], onDelete: SetNull)
+  product               Product?          @relation(fields: [productId], references: [id], onDelete: SetNull)
+  material              Material?         @relation(fields: [materialId], references: [id], onDelete: SetNull)
+  account               Account?          @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([importBatchId])
+  @@index([fiscalPeriodId])
+  @@index([plantId])
+  @@index([productId])
+  @@index([accountId])
+}
+
+model ActualOperationalRecord {
+  id                    String            @id @default(cuid())
+  organizationId        String
+  importBatchId         String
+  fiscalPeriodId        String
+  recordDate            DateTime
+  plantId               String?
+  productId             String?
+  materialId            String?
+  operationalType       String            // "SALES_VOLUME", "PRODUCTION_VOLUME", "MATERIAL_CONSUMPTION", "LABOR_HOURS", "MACHINE_HOURS", "SCRAP_QUANTITY", "INVENTORY_BALANCE", "OVERHEAD_USAGE"
+  quantity              Float
+  unitOfMeasure         String
+  unitCost              Float?
+  totalCost             Float?
+  description           String?
+  externalReference     String?
+  sourceRowNumber       Int
+  mappingStatus         String            @default("MAPPED")
+  reconciliationStatus  String            @default("RECONCILED")
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  organization          Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  importBatch           ActualImportBatch @relation(fields: [importBatchId], references: [id], onDelete: Cascade)
+  fiscalPeriod          FiscalPeriod      @relation(fields: [fiscalPeriodId], references: [id], onDelete: Cascade)
+  plant                 Plant?            @relation(fields: [plantId], references: [id], onDelete: SetNull)
+  product               Product?          @relation(fields: [productId], references: [id], onDelete: SetNull)
+  material              Material?         @relation(fields: [materialId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([importBatchId])
+  @@index([fiscalPeriodId])
+  @@index([operationalType])
+  @@index([plantId])
+  @@index([productId])
+}
+
+model ActualImportRow {
+  id                        String            @id @default(cuid())
+  importBatchId             String
+  rowNumber                 Int
+  rawPayload                String            // JSON raw record row
+  normalizedPayload         String?           // JSON normalized row
+  validationStatus          String            @default("VALID") // "VALID", "WARNING", "ERROR", "CRITICAL"
+  mappingStatus             String            @default("MAPPED") // "MAPPED", "UNMAPPED", "IGNORED"
+  errorMessages             String?           // JSON array of errors
+  warningMessages           String?           // JSON array of warnings
+  resolvedEntityReferences String?           // JSON of resolved IDs
+  createdFinancialRecordId  String?
+  createdOperationalRecordId String?
+  processedAt               DateTime          @default(now())
+
+  importBatch               ActualImportBatch @relation(fields: [importBatchId], references: [id], onDelete: Cascade)
+
+  @@index([importBatchId])
+  @@index([rowNumber])
+  @@index([validationStatus])
+}
+
+model ReconciliationResult {
+  id                  String            @id @default(cuid())
+  organizationId      String
+  importBatchId       String
+  reconciliationType  String            // "FILE_CONTROL_TOTAL", "DEBIT_CREDIT_BALANCE", "PERIOD_INTEGRITY", "DIMENSION_INTEGRITY", "FINANCIAL_STATEMENT", "BALANCE_SHEET"
+  status              String            // "BALANCED", "UNBALANCED", "WARNING", "FAILED"
+  expectedValue       Float
+  actualValue         Float
+  difference          Float
+  tolerance           Float             @default(0.01)
+  severity            String            // "INFO", "WARNING", "ERROR", "CRITICAL"
+  explanation         String
+  suggestedResolution String?
+  details             String?           // JSON
+  createdAt           DateTime          @default(now())
+
+  organization        Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  importBatch         ActualImportBatch @relation(fields: [importBatchId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([importBatchId])
+  @@index([reconciliationType])
+  @@index([status])
+}
+
+model VarianceComment {
+  id                String            @id @default(cuid())
+  organizationId    String
+  planningCycleId   String
+  planVersionId     String
+  fiscalPeriodId    String
+  plantId           String?
+  productId         String?
+  accountId         String?
+  metricCode        String            // "REVENUE", "COGS", "GROSS_PROFIT", "PRODUCTION_VOLUME", "MATERIAL_COST", "LABOR_COST", "OPEX", "OPERATING_PROFIT"
+  varianceAmount    Float
+  variancePercent   Float?
+  favorability      String            // "FAVORABLE", "UNFAVORABLE", "NEUTRAL"
+  rootCauseCategory String            // "VOLUME", "PRICE", "MIX", "TIMING", "PRODUCTION_EFFICIENCY", "MATERIAL_COST", "LABOR_COST", "OVERHEAD", "ONE_TIME_EXPENSE", "DATA_QUALITY", "FORECAST_ERROR", "EXTERNAL_FACTOR", "OTHER"
+  comment           String
+  actionOwner       String?
+  dueDate           DateTime?
+  status            String            @default("OPEN") // "OPEN", "UNDER_REVIEW", "EXPLAINED", "ACTION_REQUIRED", "RESOLVED", "ACCEPTED"
+  resolutionNotes   String?
+  createdById       String
+  updatedById       String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  organization      Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  planningCycle     PlanningCycle     @relation(fields: [planningCycleId], references: [id], onDelete: Cascade)
+  planVersion       PlanVersion       @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  fiscalPeriod      FiscalPeriod      @relation(fields: [fiscalPeriodId], references: [id], onDelete: Cascade)
+  plant             Plant?            @relation(fields: [plantId], references: [id], onDelete: SetNull)
+  product           Product?          @relation(fields: [productId], references: [id], onDelete: SetNull)
+  account           Account?          @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  createdByUser     User              @relation("VarianceCommentCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  updatedByUser     User?             @relation("VarianceCommentUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([planningCycleId])
+  @@index([planVersionId])
+  @@index([fiscalPeriodId])
+  @@index([metricCode])
+  @@index([status])
+}
+
+// ==========================================
+// Phase 6: Forecasting, Scenarios & What-If Models
+// ==========================================
+
+model ForecastPeriodSource {
+  id                String       @id @default(cuid())
+  organizationId    String
+  planVersionId     String       // Forecast PlanVersion ID
+  fiscalPeriodId    String       // FiscalPeriod ID
+  periodNumber      Int
+  sourceType        String       // "ACTUAL", "FORECAST", "PLAN", "MANUAL_OVERRIDE", "UNAVAILABLE"
+  sourceReference   String?      // Reference to ActualImportBatch ID, Base PlanVersion ID, etc.
+  actualsAvailable  Boolean      @default(false)
+  forecastAvailable Boolean      @default(false)
+  isLocked          Boolean      @default(false)
+  actualRevenue     Float?
+  actualCogs        Float?
+  actualOpex        Float?
+  actualNetProfit   Float?
+  forecastRevenue   Float?
+  forecastCogs      Float?
+  forecastOpex      Float?
+  forecastNetProfit Float?
+  notes             String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  planVersion       PlanVersion  @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  fiscalPeriod      FiscalPeriod @relation(fields: [fiscalPeriodId], references: [id], onDelete: Cascade)
+
+  @@unique([planVersionId, fiscalPeriodId])
+  @@index([organizationId])
+  @@index([planVersionId])
+  @@index([fiscalPeriodId])
+  @@index([sourceType])
+}
+
+model WhatIfScenarioDelta {
+  id                String       @id @default(cuid())
+  organizationId    String
+  planVersionId     String       // Scenario PlanVersion ID
+  targetCategory    String       // "DRIVER", "ASSUMPTION", "PLAN_INPUT", "TARGET"
+  targetCode        String       // e.g. "SALES_VOLUME", "SELLING_PRICE", "RAW_MATERIAL_COST", "LABOR_RATE", "MONTHLY_OPEX", "SCRAP_PCT", etc.
+  targetName        String
+  driverType        String?      // "RATE", "PERCENTAGE", "AMOUNT", "QUANTITY"
+  deltaType         String       // "PERCENTAGE", "ABSOLUTE", "REPLACEMENT"
+  deltaValue        Float        // e.g. +10, -3, +8
+  baselineValue     Float        // Baseline value before delta
+  proposedValue     Float        // Calculated proposed value after delta
+  affectedPeriods   String?      // JSON string of period IDs or "ALL_FUTURE"
+  affectedPlantId   String?
+  affectedProductId String?
+  rationale         String?
+  appliedById       String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  planVersion       PlanVersion  @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([planVersionId])
+  @@index([targetCode])
+}
+
+model ForecastGovernanceLog {
+  id            String       @id @default(cuid())
+  organizationId String
+  planVersionId String
+  action        String       // "SUBMIT_FOR_REVIEW", "APPROVE", "REJECT", "PUBLISH", "LOCK", "SUPERSEDE", "ARCHIVE", "COMMENT"
+  fromStatus    String
+  toStatus      String
+  notes         String?
+  performedById String
+  performedAt   DateTime     @default(now())
+
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  planVersion   PlanVersion  @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  performedByUser User       @relation("ForecastGovernanceUser", fields: [performedById], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([planVersionId])
+  @@index([action])
+}
+
